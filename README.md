@@ -49,7 +49,7 @@ class POSTHandler(http_parser.multipart):
     return DataClass()
     return None
   def on_end(self):
-    # Called in the end of post data. No matter what!
+    # Called in the end of post data
     pass
 ```
 And `data class` example,
@@ -64,26 +64,33 @@ class DataClass(object):
   def write(self, buffer):
     # receive buffer
     # Remember that, this is a callback for multipart mechanism
+    # Return None to continue
+    # otherwise is invalid, so no more data is fetched
   def finalize(self):
     # called in the end of data stream
 ```
 
 ```python
-post = http_parser.multipart(boundary)
-post = http_parser.multipart(boundary, length) # length from Content-Length
-
 post_handler = DataClass()
-post.set_handler(post_handler)
+
+post = http_parser.multipart(post_handler, boundary)
+post = http_parser.multipart(post_handler, boundary, length) # length from Content-Length
 ```
 
 And to fetch the data can be done in two ways,
-  * socket, `post.fetch_socket(con.fileno)`
-  * manually buffer, `post.send(buffer)`.
+  * socket,
+    ```python
+    post.fetch_socket(con.fileno)
+    ```
+  * manually buffer,
+    ```python
+    post.send(buffer)
+    ```
     Note: if length is given and total buffer is excessed, excessed data is ignored.
 
 Argument that multipart class hold,
   * `finished`, `True` if request is finished, `False` otherwise.
-  * `error`, `True` if error occurred, `False` otherwise.
 Available method,
-  * `send`
-  * `fetch_socket`
+  * `send(buffer)`
+  * `fetch_socket(sock_fd)`
+  * `is_error()`, `True` if error occurred, `False` otherwise.
