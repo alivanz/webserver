@@ -1,22 +1,8 @@
-#include <Python.h>
 #include "structmember.h"
 #include "deps/http-header/http_parser.c"
 #include <sys/socket.h>
+#include "http_parser_for_python.h"
 
-typedef struct{
-  PyObject_HEAD
-  int fd;
-  struct http_parser parser;
-  PyObject * method;
-  PyObject * URI;
-  PyObject * Query;
-  PyObject * header;
-  char * last_field;
-  size_t last_field_length;
-  int header_complete;
-  int message_complete;
-  int error;
-} parser_data;
 static int parser_data_init(parser_data * self, PyObject * args, PyObject * kwargs){
   http_parser_init(&self->parser, HTTP_REQUEST);
   PyArg_ParseTuple(args,"i",&self->fd);
@@ -113,7 +99,6 @@ static http_parser_settings settings = {
   .on_body = on_data
 };
 
-#define MAX_BUFFER 4096
 static PyObject * fetch_data(parser_data * self){
   // specification : receive socket fd
   int fd = self->fd;
