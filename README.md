@@ -71,6 +71,9 @@ class DataClass(object):
 ```python
 post = http_parser.multipart(boundary)
 post = http_parser.multipart(boundary, length) # length from Content-Length
+
+post_handler = DataClass()
+post.set_handler(post_handler)
 ```
 
 And to fetch the data can be done in two ways,
