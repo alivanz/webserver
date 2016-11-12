@@ -15,11 +15,11 @@ There are some specific handler,
 parser class
 ------------
 
-` request = http_parser.parser( con.fileno() )
+`` request = http_parser.parser( con.fileno() )
     request.fetch_data()
     if request.is_error():
       # error mechanism here
-```
+``
 
 Argument generated after `http_parser.parser.fetch_data` is called,
   * `method`, HTTP Request method
