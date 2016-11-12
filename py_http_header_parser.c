@@ -1,7 +1,6 @@
 #include <Python.h>
 #include "structmember.h"
 #include "deps/http-header/http_parser.c"
-#include "deps/multipart-parser-c/multipart_parser.c"
 #include <sys/socket.h>
 #include "py_http_header_parser.h"
 
