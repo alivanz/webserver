@@ -1,3 +1,4 @@
+#include <Python.h>
 #include "structmember.h"
 #include "deps/http-header/http_parser.c"
 #include <sys/socket.h>
