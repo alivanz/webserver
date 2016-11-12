@@ -1,8 +1,9 @@
 #include <Python.h>
 #include "structmember.h"
 #include "deps/http-header/http_parser.c"
+#include "deps/multipart-parser-c/multipart_parser.c"
 #include <sys/socket.h>
-#include "http_parser_for_python.h"
+#include "py_http_header_parser.h"
 
 static int parser_data_init(parser_data * self, PyObject * args, PyObject * kwargs){
   http_parser_init(&self->parser, HTTP_REQUEST);

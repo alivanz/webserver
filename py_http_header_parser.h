@@ -13,4 +13,9 @@ typedef struct{
   int error;
 } parser_data;
 
+typedef struct{
+  PyObject_HEAD
+  
+} multipart_data;
+
 #define MAX_BUFFER 4096
