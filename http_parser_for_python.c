@@ -1,6 +1,6 @@
 #include <Python.h>
 #include "structmember.h"
-#include "http_parser.c"
+#include "deps/http-header/http_parser.c"
 #include <sys/socket.h>
 
 typedef struct{
@@ -63,6 +63,8 @@ static int on_url(http_parser* p, const char *at, size_t length){
     i += 1;
     Py_DECREF(self->Query);
     self->Query = Py_BuildValue("s#",at+i,length-i);
+  }else{
+    self->Query = Py_BuildValue("s","");
   }
   return 0;
 }
