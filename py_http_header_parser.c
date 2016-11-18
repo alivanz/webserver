@@ -5,8 +5,13 @@
 #include "py_http_header_parser.h"
 
 static int parser_data_init(parser_data * self, PyObject * args, PyObject * kwargs){
+  self->parser.data = self;
   http_parser_init(&self->parser, HTTP_REQUEST);
-  PyArg_ParseTuple(args,"i",&self->fd);
+  // writeback
+  Py_INCREF(Py_None);
+  self->writeback = Py_None;
+  // processor
+  self->processor = NULL;
   // method
   Py_INCREF(Py_None);
   self->method = Py_None;
@@ -28,14 +33,18 @@ static int parser_data_init(parser_data * self, PyObject * args, PyObject * kwar
 }
 
 void parser_data_del(parser_data * self){
+  Py_DECREF(self->writeback);
+  Py_XDECREF(self->processor);
   Py_DECREF(self->method);
   Py_DECREF(self->URI);
   Py_DECREF(self->Query);
   Py_DECREF(self->header);
-  free(self->last_field);
+  if(self->last_field != NULL)
+    free(self->last_field);
   self->ob_type->tp_free((PyObject*)self);
 }
 static int on_url(http_parser* p, const char *at, size_t length){
+  return 0;
   parser_data * self = p->data; // type casting
   // method
   Py_DECREF(self->method);
@@ -72,15 +81,74 @@ static int on_header_value(http_parser* p, const char *at, size_t length) {
   Py_DECREF(value);
   return 0;
 }
+static int try_route(parser_data * self){
+  if(!PyObject_HasAttrString(self,"routing")){ // no method
+    printf("No routing method\n");
+    return 0;
+  }
+  PyObject * callback_return = PyObject_CallMethod(self, "routing", "");
+  if(callback_return==Py_None){ // no routing
+    Py_DECREF(callback_return);
+    return 0;
+  }else{
+    self->processor = callback_return;
+    return 1;
+  }
+}
 static int on_headers_complete(http_parser* p) {
-  parser_data * data = p->data; // type casting
-  data->header_complete = 1;
+  parser_data * self = p->data; // type casting
+  self->header_complete = 1; // DEPRECATED
+  // Python callback
+  printf("Try routing\n");
+  if( !try_route(self) ){ // no routing
+    printf("No Routing\n");
+    return 1;
+  }
   return 0;
 }
 static int on_message_complete(http_parser* p) {
-  parser_data * data = p->data; // type casting
-  data->message_complete = 1;
-  return 0;
+  printf("END OF TRANSFER\n");
+  parser_data * self = p->data; // type casting
+  self->message_complete = 1; // DEPRECATED
+  // UPDATED (NOT DEPRECATED)
+  // Python callback
+  // if(callback_return==Py_None) return 0;
+  // else return 1;
+  printf("%p\n", self->processor);
+  if(self->processor==NULL) return 1;
+  if(!PyObject_HasAttrString(self->processor,"respond")){ // no method
+    printf("No respond method\n");
+    return 1;
+  }
+  printf("Try respond\n");
+  PyObject * callback_return = PyObject_CallMethod(self->processor, "respond", "O", self->writeback);
+  if(callback_return==Py_None){ // success
+    printf("Respond success\n");
+    Py_DECREF(callback_return);
+    return 0;
+  }else{ // failure
+    printf("Respond failure\n");
+    Py_DECREF(callback_return);
+    return 2;
+  }
+}
+static int on_body(http_parser* p, const char *at, size_t length) {
+  // Callback to other C method like POST multipart, PUT, etc
+  parser_data * self = p->data;
+  if(!PyObject_HasAttrString(self->processor,"write")){ // no method
+    printf("Warning: No body write handler\n");
+    return 0;
+  }
+  PyObject * callback_return = PyObject_CallMethod(self->processor, "write", "s#", at,length);
+  if(callback_return==Py_None){ // success
+    printf("Body write success\n");
+    Py_DECREF(callback_return);
+    return 0;
+  }else{ // failure
+    printf("Body write failure\n");
+    Py_DECREF(callback_return);
+    return 2;
+  }
 }
 static int on_info(http_parser* p) {
   return 0;
@@ -90,42 +158,132 @@ static int on_data(http_parser* p, const char *at, size_t length) {
 }
 
 static http_parser_settings settings = {
+  // INFO
   .on_message_begin = on_info,
   .on_headers_complete = on_headers_complete,
   .on_message_complete = on_message_complete,
+
+  // DATA
   .on_header_field = on_header_field,
   .on_header_value = on_header_value,
   .on_url = on_url,
   .on_status = on_data,
-  .on_body = on_data
+  .on_body = on_body
 };
+
+static void on_error(parser_data * self){
+  http_parser* p = &self->parser;
+  int errno_ = p->http_errno;
+  char * name = http_errno_name(errno_);
+  char * desc = http_errno_description(errno_);
+  // error callback
+  if(!PyObject_HasAttrString((PyObject*)self,"on_error")){ // no method
+    printf("Warning: No error method\n");
+  }else{
+    PyObject * callback_return = PyObject_CallMethod((PyObject*)self, "on_error", "iss", errno_, name, desc);
+    Py_XDECREF(callback_return);
+  }
+}
+
+/* Parse request
+return 0 if success */
+static int C_request_write(parser_data * self, char * at, size_t length){
+  http_parser* p = &self->parser;
+  int parsed = http_parser_execute(&self->parser, &settings, at, length);
+  if(parsed != length) return 1;
+  if(p->http_errno != HPE_OK){
+    on_error(self);
+    return 2;
+  }
+  return 0;
+}
+
+/* Set writeback */
+static PyObject * set_writeback(parser_data * self, PyObject * writeback){
+  Py_DECREF(self->writeback);
+  Py_INCREF(writeback);
+  self->writeback = writeback;
+  Py_RETURN_NONE;
+}
+
+/* Hardwrite */
+static PyObject* hardwrite(parser_data * self, PyObject* buffer){
+  char * at;
+  size_t length;
+  PyString_AsStringAndSize(buffer, &at, &length);
+  if(!C_request_write(self, at,length)){
+    Py_RETURN_FALSE;
+  }else{
+    Py_RETURN_TRUE;
+  }
+}
+
+/* Socket write */
+static void C_write_from_socket(parser_data * self, int fd){
+  int length;
+  char buffer[MAX_BUFFER];
+  http_parser* p = &self->parser;
+
+  if(p->http_errno != HPE_OK) // error occurred
+    on_error(self);
+/*
+  while(!self->message_complete){
+    length = recv(fd,buffer,MAX_BUFFER,0);
+    if(C_request_write(self, buffer, length)){
+      break;
+    }
+  }
+*/
+  length = recv(fd,buffer,MAX_BUFFER,0);
+  C_request_write(self, buffer, length);
+}
+static PyObject * write_from_socket(parser_data * self, PyObject * py_fd){
+  int fd = PyInt_AsLong(py_fd);
+  printf("Sock fd: %i\n", fd);
+  C_write_from_socket(self,fd);
+  Py_RETURN_NONE;
+}
 
 static PyObject * fetch_data(parser_data * self){
   // specification : receive socket fd
-  int fd = self->fd;
-  int buffer_length;
-  int parsed;
-  char buffer[MAX_BUFFER];
+  //int fd = self->fd;
+  //int buffer_length;
+  //int parsed;
+  //char buffer[MAX_BUFFER];
+  http_parser* p = &self->parser;
   // prepare
   self->parser.data = self;
   // start
-  while(1){
+  if(p->http_errno != HPE_OK){ // error occurred
+    on_error(self);
+  }else{
+    /*while(!self->message_complete){
+      buffer_length = recv(fd,buffer,MAX_BUFFER,0);
+      if(C_request_write(self, buffer, buffer_length)){
+        break;
+      }
+    }*/
+  }
+  /*
+  while(p->http_errno == HPE_OK){
     buffer_length = recv(fd,buffer,MAX_BUFFER,0);
     parsed = http_parser_execute(&self->parser, &settings, buffer, buffer_length);
     if(!buffer_length) break;
     if(parsed != buffer_length){
-      self->error = 1;
+      //printf("ERROR DETECTED!!!\n");
+      //self->error = 1;
       break;
     };
-    if(self->header_complete) break;
+    if(p->http_errno != HPE_OK) break;
+    //if(self->header_complete) break;
     if(self->message_complete) break;
-  }
+  }*/
   Py_RETURN_NONE;
 }
 
 static PyObject * is_error(parser_data * self){
-  if(self->error) Py_RETURN_TRUE;
-  else Py_RETURN_FALSE;
+  if(self->parser.http_errno == HPE_OK) Py_RETURN_FALSE;
+  else Py_RETURN_TRUE;
 }
 
 static PyMemberDef parser_data_members[] = {
@@ -136,7 +294,10 @@ static PyMemberDef parser_data_members[] = {
     {NULL}
 };
 static PyMethodDef parser_data_methods[] = {
-    {"fetch_data", (PyCFunction)fetch_data, METH_NOARGS, "Fetching data, return parser_data object." },
+    {"fetch_data", (PyCFunction)fetch_data, METH_NOARGS, "Fetching data, return parser_data object." }, // DEPRECATED
+    {"write", (PyCFunction)hardwrite, METH_O, "Write request stream." },
+    {"set_writeback", (PyCFunction)set_writeback, METH_O, "Set writeback." },
+    {"write_from_socket", (PyCFunction)write_from_socket, METH_O, "Write request stream from socket fd." },
     {"is_error", (PyCFunction)is_error, METH_NOARGS, "Check if parser_data object is error." },
     {NULL}
 };
@@ -186,14 +347,19 @@ static PyMethodDef methods[] = {
   {NULL}
 };
 
-void inithttp_parser(){
+int prepare(PyObject* m){
   if (PyType_Ready(&parser_data_type) < 0){
     printf("Type not ready\n");
-    return;
+    return 1;
   }
-  PyObject* m = Py_InitModule3("http_parser", methods,"HTTP/1.x parser modules.");
-  if (m == NULL)
-    return;
   Py_INCREF(&parser_data_type);
   PyModule_AddObject(m, "parser", (PyObject *)&parser_data_type);
+  return 0;
+}
+
+void inithttp_request(){
+  PyObject* m = Py_InitModule3("http_request", methods,"HTTP/1.x request parser modules.");
+  if (m == NULL)
+    return;
+  prepare(m);
 }

@@ -94,3 +94,43 @@ Available method,
   * `send(buffer)`
   * `fetch_socket(sock_fd)`
   * `is_error()`, `True` if error occurred, `False` otherwise.
+
+Success example
+===============
+```python
+import socket
+s = socket.socket()
+s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+s.bind(('',10000))
+s.listen(1)
+
+con,addr = s.accept()
+
+import http_parser
+
+class mod(http_parser.parser):
+    def routing(self):
+        print self.method
+        print self.URI
+        print self.header
+        return handler()
+    def on_error(self, code, name, desc):
+        print "ERROR {code} {name}".format(code=code, name=name)
+        print desc
+class handler:
+    def write(self,buffer):
+        print buffer
+    def respond(self,write):
+        write("HTTP/1.1 200 OK\r\n")
+        write("\r\n")
+        write("Halo!")
+
+request = mod()
+request.set_writeback(con.sendall)
+request.write_from_socket(con.fileno())
+
+print "finally"
+con.close()
+
+s.close()
+```
