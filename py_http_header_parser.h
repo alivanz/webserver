@@ -13,7 +13,7 @@ typedef struct{
   int message_complete; // DEPRECATED
   int error;
   PyObject * processor;
-} parser_data;
+} request_t;
 
 typedef struct{
   PyObject_HEAD
