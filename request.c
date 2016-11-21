@@ -24,6 +24,7 @@ static int request_init(request_t * self, PyObject * args, PyObject * kwargs){
   self->handler = Py_None;
 
   self->completed = 0;
+  self->error = 0;
 
   return 0;
 }
@@ -79,6 +80,7 @@ static int on_header_value(http_parser* p, const char *at, size_t length) {
   Py_DECREF(self->field);
   self->field = NULL;
   Py_DECREF(value);
+  return 0;
   /*PyObject * result = PyObject_CallMethod((PyObject*)self,"on_header_value","s#", at,length);
   if(result==NULL) return -1;
   Py_DECREF(result);
@@ -101,6 +103,10 @@ static int on_headers_complete(http_parser* p){
   PyObject * handler = PyObject_CallMethod((PyObject*)self,"routing","");
   if(handler==NULL){
     PyErr_SetString(exception,"request.routing failed.");
+    return -1;
+  }else if(handler==Py_None){
+    self->error = 404;
+    Py_DECREF(handler);
     return -1;
   }
   Py_DECREF(self->handler);
@@ -148,10 +154,10 @@ static int on_message_complete(http_parser* p) {
 
   PyObject * result = PyObject_CallMethod((PyObject*)self->handler,"write_end","");
   if(result==NULL){
-    PyErr_SetString(exception,"(request->write_end).write failed.");
+    PyErr_SetString(exception,"(request->routing).write_end failed.");
     return -1;
   }else if(result!=Py_None){
-    PyErr_SetString(exception,"(request->write_end).write return something (non-None).");
+    PyErr_SetString(exception,"(request->routing).write_end return something (non-None).");
     Py_DECREF(result);
     return -1;
   }
@@ -184,22 +190,30 @@ static PyObject * request_write(request_t * self, PyObject * buffer){
 
   // Process error
   if( self->parser.http_errno > HPE_OK || parsed!=length ){
-    if(PyErr_Occurred()==NULL){ // Unknown Error
-      PyObject * tmp = PyObject_CallMethod((PyObject*)self,"on_error","i", 500);
+    PyObject * err = PyErr_Occurred();
+    if(err==NULL){ // No exception
+      PyObject * tmp;
+      if(self->error==0) tmp = PyObject_CallMethod((PyObject*)self,"on_error","i", 500);
+      else tmp = PyObject_CallMethod((PyObject*)self,"on_error","i", self->error);
       if(tmp==NULL){
         PyErr_SetString(exception,"Parse error and request.on_error call failed");
+        return NULL;
       }
-      return NULL;
       Py_DECREF(tmp);
-    }else{ // Known error
+    }else{ // exception detected
+      // BUG : Exception detected, cant call on_error
+      // BUG fix
+      PyErr_Print();
+      PyErr_Clear();
+      // BUG
       if(PyObject_HasAttrString((PyObject*)self,"on_error")){
         PyObject * tmp = PyObject_CallMethod((PyObject*)self,"on_error","i", 500);
         if(tmp!=NULL){
           Py_DECREF(tmp);
         }
       }
-      return NULL;
     }
+    Py_RETURN_FALSE;
   }
 
   if(self->completed) Py_RETURN_NONE;
@@ -273,6 +287,9 @@ static PyTypeObject request_type = {
     PyType_GenericNew,                 /* tp_new */
 };
 
+// HTTP ERROR NAME MAP
+PyObject * status_name;
+
 static PyMethodDef methods[] = {
   {NULL}
 };
@@ -287,8 +304,21 @@ int prepare(PyObject* m){
   }
   Py_INCREF(&request_type);
 
+  status_name = PyDict_New();
+  PyObject * key;
+  PyObject * value;
+  #define XX(num, name, string) \
+    key = Py_BuildValue("i",num); \
+    value = Py_BuildValue("s",#string); \
+    PyDict_SetItem(status_name,key,value); \
+    Py_DECREF(key); \
+    Py_DECREF(value);
+    HTTP_STATUS_MAP(XX)
+  #undef XX
+
   PyModule_AddObject(m, "error", exception);
   PyModule_AddObject(m, "request", (PyObject *)&request_type);
+  PyModule_AddObject(m, "status_name", status_name);
   return 0;
 }
 

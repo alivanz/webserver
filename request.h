@@ -14,6 +14,7 @@ typedef struct{
   PyObject * handler;
 
   int completed;
+  int error;
 } request_t;
 
 static int on_url(http_parser* p, const char *at, size_t length);
