@@ -12,6 +12,7 @@ typedef struct{
   int header_complete;
   int message_complete; // DEPRECATED
   int error;
+  char * error_msg;
   PyObject * processor;
 } request_t;
 
