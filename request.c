@@ -27,6 +27,7 @@ static int request_init(request_t * self, PyObject * args, PyObject * kwargs){
   self->writeback = Py_None;
   Py_INCREF(Py_None);
   self->handler = Py_None;
+  self->client = NULL;
 
   self->completed = 0;
   self->error = 0;
@@ -41,8 +42,15 @@ void request_del(request_t * self){
   Py_XDECREF(self->URL);
   Py_XDECREF(self->Query);
   Py_XDECREF(self->version);
+
   Py_XDECREF(self->field);
   Py_DECREF(self->header);
+
+  // Add opt free (bug fix)
+  Py_XDECREF(self->writeback);
+  Py_XDECREF(self->handler);
+  Py_XDECREF(self->client);
+
   self->ob_type->tp_free((PyObject*)self);
 }
 
@@ -384,10 +392,22 @@ static PyObject * request_write(request_t * self, PyObject * buffer){
 
   Py_RETURN_TRUE;*/
 }
+
+/* OPTIONS */
 static PyObject * set_writeback(request_t * self, PyObject * writeback){
   Py_DECREF(self->writeback);
   Py_INCREF(writeback);
   self->writeback = writeback;
+  Py_RETURN_NONE;
+}
+static PyObject * set_client(request_t * self, PyObject * client){
+  if(!PyString_CheckExact(client)){
+    PyErr_SetString(PyExc_TypeError,"Invalid data type, string expected ('host:port' or 'host').");
+    return NULL;
+  }
+  Py_XDECREF(self->client);
+  Py_INCREF(client);
+  self->client = client;
   Py_RETURN_NONE;
 }
 

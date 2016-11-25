@@ -13,6 +13,7 @@ typedef struct{
 
   PyObject * writeback;
   PyObject * handler;
+  PyObject * client;
 
   int completed;
   int error;
@@ -69,3 +70,8 @@ PyObject * exception;
 
 // SPECIAL ERROR CODE / SIGNAL
 #define JUST_TERMINATE 1000
+
+// OPT CONSTANT
+#define REQUEST_OPT(XX) \
+  XX(100,   WRITEBACK) \
+  XX(101,   HOST)
