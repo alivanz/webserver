@@ -4,6 +4,7 @@ typedef struct{
   struct http_parser parser;
   PyObject * method;
   PyObject * URI;
+  PyObject * URL;
   PyObject * Query;
   PyObject * version;
 
@@ -47,7 +48,7 @@ static http_parser_settings settings = {
   .on_status = on_data,
   .on_body = on_body
 };
-static http_parser_settings dummy_settings = {
+/*static http_parser_settings dummy_settings = {
   // INFO
   .on_message_begin = on_info,
   .on_headers_complete = on_info,
@@ -59,9 +60,12 @@ static http_parser_settings dummy_settings = {
   .on_url = on_data,
   .on_status = on_data,
   .on_body = on_data
-};
+};*/
 
 // exception
 PyObject * exception;
 //#define Raise(msg) if(PyErr_Occurred()==NULL) PyErr_SetString(exception,msg)
 //#define ForceRaise(msg) if(PyErr_Occurred()==NULL) PyErr_SetString(exception,msg)
+
+// SPECIAL ERROR CODE / SIGNAL
+#define JUST_TERMINATE 1000

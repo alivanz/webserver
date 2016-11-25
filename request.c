@@ -4,6 +4,10 @@
 #include <sys/socket.h>
 #include "request.h"
 
+/* TRACEBACK */
+//#include <frameobject.h>
+//#include <traceback.h>
+
 /* Request Python __init__ method */
 /* prepare initial object, setup parser struct. */
 static int request_init(request_t * self, PyObject * args, PyObject * kwargs){
@@ -12,6 +16,7 @@ static int request_init(request_t * self, PyObject * args, PyObject * kwargs){
 
   self->method = NULL;
   self->URI = NULL;
+  self->URL = NULL;
   self->Query = NULL;
   self->version = NULL;
 
@@ -33,6 +38,7 @@ static int request_init(request_t * self, PyObject * args, PyObject * kwargs){
 void request_del(request_t * self){
   Py_XDECREF(self->method);
   Py_XDECREF(self->URI);
+  Py_XDECREF(self->URL);
   Py_XDECREF(self->Query);
   Py_XDECREF(self->version);
   Py_XDECREF(self->field);
@@ -40,14 +46,56 @@ void request_del(request_t * self){
   self->ob_type->tp_free((PyObject*)self);
 }
 
+/* Call */
+static inline PyObject * call_routing(request_t * self){
+  Py_EnterRecursiveCall("Call request.routing()");
+  PyObject * result = PyObject_CallMethod((PyObject*)self,"routing","");
+  Py_LeaveRecursiveCall();
+  return result;
+}
+static inline PyObject * call_routing_set_writeback(request_t * self){
+  PyObject * handler = self->handler;
+  Py_EnterRecursiveCall("Call (request->routing).set_writeback( writeback )");
+  PyObject * result = PyObject_CallMethod((PyObject*)handler,"set_writeback","O",self->writeback);
+  Py_LeaveRecursiveCall();
+  return result;
+}
+static inline PyObject * call_routing_write(request_t * self, char * at, int length){
+  PyObject * handler = self->handler;
+  Py_EnterRecursiveCall("Call (request->routing).write( buffer )");
+  PyObject * result = PyObject_CallMethod((PyObject*)handler,"write","s#", at,length);
+  Py_LeaveRecursiveCall();
+  return result;
+}
+static inline PyObject * call_routing_write_end(request_t * self){
+  Py_EnterRecursiveCall("Call (request->routing).write_end");
+  PyObject * result = PyObject_CallMethod((PyObject*)self->handler,"write_end","");
+  Py_LeaveRecursiveCall();
+  return result;
+}
+static inline void call_request_on_error(request_t * self, int code, const char * msg){
+  // store error
+  PyErr_Clear();
+  // call
+  Py_EnterRecursiveCall("Call request.on_error( code, msg )");
+  PyObject * result = PyObject_CallMethod((PyObject*)self,"on_error","is", code, msg);
+  Py_LeaveRecursiveCall();
+  // Dump
+  if(result==NULL){
+    printf("Fatal Error, Unable to dump error.\n");
+  }else{
+    //printf("JUST_TERMINATE\n");
+    Py_DECREF(result);
+    self->error = JUST_TERMINATE;
+  }
+}
+
 /* Parser execution */
 static int on_url(http_parser* p, const char *at, size_t length){
   request_t * self = p->data;
-  // method
-  self->method = Py_BuildValue("s", http_method_str(p->method) );
-  // URI
-  self->URI = Py_BuildValue("s#",at,length);
-  // query
+  self->method  = Py_BuildValue("s", http_method_str(p->method) );
+  self->URI     = Py_BuildValue("s#",at,length);
+  // URL & query
   size_t i = 0;
   while(i<length && at[i]!='?') i += 1;
   if(i<length){
@@ -56,22 +104,14 @@ static int on_url(http_parser* p, const char *at, size_t length){
   }else{
     self->Query = Py_BuildValue("s","");
   }
+  self->URL     = Py_BuildValue("s#",at,i);
 
   return 0;
-
-  /*PyObject * result = PyObject_CallMethod((PyObject*)self,"on_url","s#", at,length);
-  if(result==NULL) return -1;
-  Py_DECREF(result);
-  return 0;*/
 }
 static int on_header_field(http_parser* p, const char *at, size_t length){
-  request_t * self = p->data;
-  self->field = Py_BuildValue("s#",at,length);
+  request_t * self  = p->data;
+  self->field       = Py_BuildValue("s#",at,length);
   return 0;
-  /*PyObject * result = PyObject_CallMethod((PyObject*)self,"on_header_field","s#", at,length);
-  if(result==NULL) return -1;
-  Py_DECREF(result);
-  return 0;*/
 }
 static int on_header_value(http_parser* p, const char *at, size_t length) {
   request_t * self = p->data;
@@ -81,26 +121,29 @@ static int on_header_value(http_parser* p, const char *at, size_t length) {
   self->field = NULL;
   Py_DECREF(value);
   return 0;
-  /*PyObject * result = PyObject_CallMethod((PyObject*)self,"on_header_value","s#", at,length);
-  if(result==NULL) return -1;
-  Py_DECREF(result);
-  return 0;*/
 }
 static int on_headers_complete(http_parser* p){
   request_t * self = p->data;
-  /*PyObject * result = PyObject_CallMethod((PyObject*)self,"on_headers_complete","");
-  if(result==NULL) return -1;
-  Py_DECREF(result);
-  return 0;*/
-
-  // version
-  //char tmp[16];
-  //sprintf(tmp,"HTTP/%i.%i", p->http_major, p->http_minor);
-  //self->version = Py_BuildValue("s", tmp);
 
   // get handler
   // Add history here, for debugging (NOT IMPLEMENTED YET)
-  Py_EnterRecursiveCall("Call request.routing()");
+  PyObject * result = call_routing(self);
+  if(result==NULL){
+    call_request_on_error(self,500,"Routing failure.");
+    //printf("routing failed\n");
+    //self->error = 500;
+    return -1;
+  }else if(result==Py_None){
+    call_request_on_error(self,404,"ting available.");
+    //self->error = 404;
+    Py_DECREF(result);
+    //PyErr_SetString(exception,"No routing found");
+    return -1;
+  }else{
+    Py_DECREF(self->handler);
+    self->handler = result;
+  }
+  /*Py_EnterRecursiveCall("Call request.routing()");
   PyObject * handler = PyObject_CallMethod((PyObject*)self,"routing","");
   Py_LeaveRecursiveCall();
   if(handler==NULL){ // exception
@@ -114,10 +157,21 @@ static int on_headers_complete(http_parser* p){
     return -1;
   }
   Py_DECREF(self->handler);
-  self->handler = handler;
+  self->handler = handler;*/
 
   // set_writeback
-  Py_EnterRecursiveCall("Call (request->routing).set_writeback( writeback )");
+  // Also fix bug, (unfreed result)
+  result = call_routing_set_writeback(self);
+  if(result==NULL){
+    call_request_on_error(self,500,"Failed to set writeback on Routing object.");
+    //self->error = 500;
+    //PyErr_SetString(exception,"(request->routing).set_writeback failed.");
+    return -1;
+  }else{
+    Py_DECREF(result);
+    return 0;
+  }
+  /*Py_EnterRecursiveCall("Call (request->routing).set_writeback( writeback )");
   PyObject * result = PyObject_CallMethod((PyObject*)handler,"set_writeback","O",self->writeback);
   Py_LeaveRecursiveCall();
   if(result==NULL){
@@ -126,18 +180,36 @@ static int on_headers_complete(http_parser* p){
     return -1;
   }
 
-  return 0;
+  return 0;*/
 }
+
 static int on_body(http_parser* p, const char *at, size_t length) {
   request_t * self = p->data;
-  /*PyObject * result = PyObject_CallMethod((PyObject*)self,"on_body","s#", at,length);
-  if(result==NULL) return -1;
-  Py_DECREF(result);
-  return 0;*/
 
-  PyObject * handler = self->handler;
+  // PyObject * handler = self->handler; <=== disabled
   // get handler
-  Py_EnterRecursiveCall("Call (request->routing).write( buffer )");
+  PyObject * result = call_routing_write(self, at, length);
+  if(result == NULL){
+    call_request_on_error(self,500,"Failed to write stream on Routing object.");
+    //self->error = 500;
+    return -1;
+  }else if(result == Py_True){
+    Py_DECREF(result);
+    return 0;
+  }else if(result == Py_None){
+    // stop without exception
+    self->error = JUST_TERMINATE;
+    Py_DECREF(result);
+    return -1;
+  }else{
+    // Note that maybe Py_False
+    call_request_on_error(self,500,"Routing object return unexpected value while writing.");
+    //self->error = 500;
+    //PyErr_SetString(exception,"(request->routing).write return unexpected value.");
+    Py_DECREF(result);
+    return -1;
+  }
+  /*Py_EnterRecursiveCall("Call (request->routing).write( buffer )");
   PyObject * result = PyObject_CallMethod((PyObject*)handler,"write","s#", at,length);
   Py_LeaveRecursiveCall();
   if(result==NULL){
@@ -156,18 +228,39 @@ static int on_body(http_parser* p, const char *at, size_t length) {
     PyErr_SetString(exception,"(request->routing).write return unexpected value.");
     Py_DECREF(result);
     return -1;
-  }
+  }*/
 }
+
 static int on_message_complete(http_parser* p) {
   request_t * self = p->data;
-  /*PyObject * result = PyObject_CallMethod((PyObject*)self,"on_message_complete","");
-  if(result==NULL) return -1;
-  Py_DECREF(result);
-  return 0;*/
 
+  // finalize
   self->completed = 1;
 
-  Py_EnterRecursiveCall("Call (request->routing).write_end");
+  // bug fix, unfreed memory
+  PyObject * result = call_routing_write_end(self);
+  if(result == NULL){
+    printf("(request->routing).write_end failed. (request.on_error will not called)\n");
+
+    // traceback
+    //PyTracebackObject* traceback = get_the_traceback();
+    //int line = traceback->tb_lineno;
+    //const char* filename = PyString_AsString(traceback->tb_frame->f_code->co_filename);
+    //printf("%s\n", filename);
+
+    self->error = JUST_TERMINATE;
+    return -1;
+  }else if(result == Py_None){
+    Py_DECREF(result);
+    return 0;
+  }else{
+    //self->error = 500;
+    printf("(request->routing).write_end return unexpected value.\n");
+    self->error = JUST_TERMINATE;
+    Py_DECREF(result);
+    return -1;
+  }
+  /*Py_EnterRecursiveCall("Call (request->routing).write_end");
   PyObject * result = PyObject_CallMethod((PyObject*)self->handler,"write_end","");
   Py_LeaveRecursiveCall();
   if(result==NULL){
@@ -180,10 +273,12 @@ static int on_message_complete(http_parser* p) {
     Py_DECREF(result);
     return -1;
   }
-  return 0;
+  return 0;*/
 }
 
 static PyObject * request_write(request_t * self, PyObject * buffer){
+  struct http_parser * p = &self->parser;
+
   if(!PyString_CheckExact(buffer)){
     PyErr_SetString(PyExc_TypeError,"Invalid data type, string expected.");
     return NULL;
@@ -192,12 +287,73 @@ static PyObject * request_write(request_t * self, PyObject * buffer){
   long int length;
   PyString_AsStringAndSize(buffer, &at, &length);
 
-  struct http_parser * p = &self->parser;
-  Py_EnterRecursiveCall("Call (request) C http_parser_execute");
+  //Py_EnterRecursiveCall("Call (request) C http_parser_execute");
   long int parsed = http_parser_execute(p, &settings, at, length);
-  Py_LeaveRecursiveCall();
+  //Py_LeaveRecursiveCall();
 
-  if( self->parser.http_errno != HPE_OK || parsed!=length ){ // error detected
+
+  /* NEW MODEL */
+  if(PyErr_Occurred()!=NULL) return NULL;
+
+  /* Parse Error */
+  if(p->http_errno >= HPE_INVALID_EOF_STATE){
+    printf("Parse error\n");
+    //self->error = 400;
+    //PyObject * result = call_request_on_error(self,400,"Parse Error");
+    call_request_on_error(self,400,"Parse Error");
+    if(self->error == JUST_TERMINATE){
+      //PyErr_Clear();
+      Py_RETURN_FALSE;
+    }else{
+      Py_RETURN_FALSE;
+    }
+  }
+
+  /* Callback Error */
+  if(p->http_errno >= HPE_OK){
+    //printf("Callback error\n");
+    //printf("%i\n", self->error);
+    if(self->error == JUST_TERMINATE){
+      //PyErr_Clear();
+      Py_RETURN_NONE;
+    }else{
+      Py_RETURN_FALSE;
+    }
+    /*
+    PyObject * err = PyErr_Occurred();
+    if(err==NULL){
+      // C Code error / Bad Style
+      // Internal Server Error
+      switch (self->error) {
+        case JUST_TERMINATE:
+          Py_RETURN_NONE;
+        default:
+          // Set error
+          PyErr_SetString(PyExc_SystemError, "C Code error / Bad Style");
+          // Continue to detected error
+      }
+      // Different from old logic, that possible callback error without exception, then call handler.write_end
+    }
+    // Detected Error
+    // Dump to on_error
+    self->error = 500;
+    PyObject * result = call_request_on_error(self);
+    if(result==NULL){
+      // Fatal Error
+      // Unable to dump error
+      printf("Fatal Error, Unable to dump error.\n");
+      Py_RETURN_FALSE;
+    }else{
+      Py_DECREF(result);
+      Py_RETURN_FALSE;
+    }
+    */
+  }
+
+  // All is going well
+  Py_RETURN_TRUE;
+
+  /*if( self->parser.http_errno != HPE_OK || parsed!=length ){ // error detected
     PyObject * exc = PyErr_Occurred();
     if(exc==NULL){ // no exception
       Py_EnterRecursiveCall("Call (request->routing).write_end");
@@ -224,51 +380,9 @@ static PyObject * request_write(request_t * self, PyObject * buffer){
     }
   }
 
-  /*
-  // Parse Error
-  if( self->parser.http_errno >= HPE_INVALID_EOF_STATE ){
-  // call error handler
-  PyObject * tmp = PyObject_CallMethod((PyObject*)self,"on_error","i", 400);
-  if(tmp==NULL){
-    PyErr_SetString(exception,"Parse error and request.on_error call failed");
-    return NULL;
-  }
-    Py_DECREF(tmp);
-    Py_RETURN_FALSE;
-  }
-  // Process error
-  if( self->parser.http_errno > HPE_OK || parsed!=length ){
-    PyObject * err = PyErr_Occurred();
-    if(err==NULL){ // No exception
-      PyObject * tmp;
-      if(self->error==0) tmp = PyObject_CallMethod((PyObject*)self,"on_error","i", 500);
-      else tmp = PyObject_CallMethod((PyObject*)self,"on_error","i", self->error);
-      if(tmp==NULL){
-        printf("Parse error and request.on_error call failed :\n");
-        PyErr_Print();
-        PyErr_Clear();
-        Py_RETURN_FALSE;
-      }
-      Py_DECREF(tmp);
-    }else{ // exception detected
-      // BUG : Exception detected, cant call on_error
-      // BUG fix
-      PyErr_Print();
-      PyErr_Clear();
-      // BUG
-      if(PyObject_HasAttrString((PyObject*)self,"on_error")){
-        PyObject * tmp = PyObject_CallMethod((PyObject*)self,"on_error","i", 500);
-        if(tmp!=NULL){
-          Py_DECREF(tmp);
-        }
-      }
-    }
-    Py_RETURN_FALSE;
-  }*/
-
   if(self->completed) Py_RETURN_NONE;
 
-  Py_RETURN_TRUE;
+  Py_RETURN_TRUE;*/
 }
 static PyObject * set_writeback(request_t * self, PyObject * writeback){
   Py_DECREF(self->writeback);
@@ -281,6 +395,7 @@ static PyMemberDef request_members[] = {
   // static
   {"method", T_OBJECT, offsetof(request_t, method), READONLY, "HTTP Method"},
   {"URI", T_OBJECT, offsetof(request_t, URI), READONLY, "Request URI"},
+  {"URL", T_OBJECT, offsetof(request_t, URL), READONLY, "Request URL"},
   {"Query", T_OBJECT, offsetof(request_t, Query), READONLY, "Request Query. Used in GET variables."},
   {"version", T_OBJECT, offsetof(request_t, version), READONLY, "HTTP Version."},
   {"header", T_OBJECT_EX, offsetof(request_t, header), READONLY, "HTTP Header"},
