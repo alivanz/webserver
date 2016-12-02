@@ -137,13 +137,14 @@ static int on_headers_complete(http_parser* p){
   // Add history here, for debugging (NOT IMPLEMENTED YET)
   PyObject * result = call_routing(self);
   if(result==NULL){
-    call_request_on_error(self,500,"Routing failure.");
+    // call_request_on_error(self,500,"Routing failure.");
     //printf("routing failed\n");
     //self->error = 500;
     return -1;
   }else if(result==Py_None){
-    call_request_on_error(self,404,"ting available.");
+    call_request_on_error(self,404,"No routing available.");
     //self->error = 404;
+
     Py_DECREF(result);
     //PyErr_SetString(exception,"No routing found");
     return -1;
@@ -171,7 +172,7 @@ static int on_headers_complete(http_parser* p){
   // Also fix bug, (unfreed result)
   result = call_routing_set_writeback(self);
   if(result==NULL){
-    call_request_on_error(self,500,"Failed to set writeback on Routing object.");
+    // call_request_on_error(self,500,"Failed to set writeback on Routing object.");
     //self->error = 500;
     //PyErr_SetString(exception,"(request->routing).set_writeback failed.");
     return -1;
@@ -198,8 +199,7 @@ static int on_body(http_parser* p, const char *at, size_t length) {
   // get handler
   PyObject * result = call_routing_write(self, at, length);
   if(result == NULL){
-    call_request_on_error(self,500,"Failed to write stream on Routing object.");
-    //self->error = 500;
+    // call_request_on_error(self,500,"Failed to write stream on Routing object.");
     return -1;
   }else if(result == Py_True){
     Py_DECREF(result);
@@ -211,7 +211,7 @@ static int on_body(http_parser* p, const char *at, size_t length) {
     return -1;
   }else{
     // Note that maybe Py_False
-    call_request_on_error(self,500,"Routing object return unexpected value while writing.");
+    // call_request_on_error(self,500,"Routing object return unexpected value while writing.");
     //self->error = 500;
     //PyErr_SetString(exception,"(request->routing).write return unexpected value.");
     Py_DECREF(result);
@@ -248,7 +248,7 @@ static int on_message_complete(http_parser* p) {
   // bug fix, unfreed memory
   PyObject * result = call_routing_write_end(self);
   if(result == NULL){
-    printf("(request->routing).write_end failed. (request.on_error will not called)\n");
+    //printf("(request->routing).write_end failed. (request.on_error will not called)\n");
 
     // traceback
     //PyTracebackObject* traceback = get_the_traceback();
@@ -256,15 +256,16 @@ static int on_message_complete(http_parser* p) {
     //const char* filename = PyString_AsString(traceback->tb_frame->f_code->co_filename);
     //printf("%s\n", filename);
 
-    self->error = JUST_TERMINATE;
+    // self->error = JUST_TERMINATE;
     return -1;
   }else if(result == Py_None){
     Py_DECREF(result);
     return 0;
   }else{
     //self->error = 500;
-    printf("(request->routing).write_end return unexpected value.\n");
-    self->error = JUST_TERMINATE;
+    //printf("(request->routing).write_end return unexpected value.\n");
+    //self->error = JUST_TERMINATE;
+    PyErr_SetString(PyExc_TypeError,"handler write_end method return unexpected value");
     Py_DECREF(result);
     return -1;
   }
@@ -305,7 +306,7 @@ static PyObject * request_write(request_t * self, PyObject * buffer){
 
   /* Parse Error */
   if(p->http_errno >= HPE_INVALID_EOF_STATE){
-    printf("Parse error\n");
+    //printf("Parse error\n");
     //self->error = 400;
     //PyObject * result = call_request_on_error(self,400,"Parse Error");
     call_request_on_error(self,400,"Parse Error");
@@ -422,11 +423,13 @@ static PyMemberDef request_members[] = {
 
   // non-static
   {"respond", T_OBJECT, offsetof(request_t, writeback), READONLY, "Writeback method."},
+  {"client", T_OBJECT, offsetof(request_t, client), READONLY, "Client info. Set up by set_client method."},
   {NULL}
 };
 static PyMethodDef request_methods[] = {
   {"write", (PyCFunction)request_write, METH_O, "Write request stream." },
   {"set_writeback", (PyCFunction)set_writeback, METH_O, "Set writeback." },
+  {"set_client", (PyCFunction)set_client, METH_O, "Set client info." },
   //{"is_error", (PyCFunction)request_is_error, METH_NOARGS, "Check if request_t object is error." }
   {NULL}
 };
