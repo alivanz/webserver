@@ -24,6 +24,8 @@ Argument generated after `http_parser.parser.fetch_data` is called,
   * `version`, HTTP version. (eg. `HTTP/1.1`)
   * `header`, all request header stored here.
     eg. `Content-Disposition`, `Cookie`, `Host`
+
+
 Method,
   * `write( buffer )`, accept data string
   * `set_writeback( writeback )`, set response receiver. (eg. `connection.sendall`)
