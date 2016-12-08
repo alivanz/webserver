@@ -128,9 +128,8 @@ int urlencoded_finalize(urlencoded_t * p, urlencoded_action * action){
     case ue_value_percent_data:
     if(action->on_data(p,p->buffer,p->buffer_length)) return -1;
     urlencoded_free(p);
-
-    return 0;
   }
+  return 0;
 }
 
 #endif
