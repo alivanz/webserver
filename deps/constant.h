@@ -6,7 +6,7 @@
 static PyObject * http_error;
 static int constant_initialized = 0;
 
-static void constant_init(){
+static void constant_init(void){
   if(constant_initialized) return;
   constant_initialized = 1;
   http_error = PyErr_NewExceptionWithDoc(
