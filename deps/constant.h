@@ -10,8 +10,8 @@ static void constant_init(){
   if(constant_initialized) return;
   constant_initialized = 1;
   http_error = PyErr_NewExceptionWithDoc(
-    'http_error',
-    'base http_error',
+    "http_error",
+    "base http_error",
     NULL,NULL /* base,dict */
   );
 }
