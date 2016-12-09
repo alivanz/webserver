@@ -3,6 +3,19 @@
 
 #include <Python.h>
 
+enum{
+  CONTENT_DISPOSITION = 1,
+  CONTENT_TYPE
+} known_field;
+enum{
+  NAME = 1,
+  FILENAME
+} known_param;
+enum{
+  URLENCODED = 1,
+  FORMDATA, PLAIN
+} known_encoding;
+
 static PyObject * http_error;
 static PyObject * client_error;
 static PyObject * server_error;

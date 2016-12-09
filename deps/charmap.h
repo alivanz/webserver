@@ -25,6 +25,15 @@ char hexadecimal_decode(char * c2){
   }
   return (h<<4)+l;
 }
+char hexadecimal_byte(char c){
+  switch (c) {
+    case '0'...'9': return c-'0';
+    case 'a'...'z': return c-'a'+10;
+    case 'A'...'Z': return c-'A'+10;
+  }
+  return 0;
+}
+
 
 /* Check chars, chars_check("apaya?", at,length) */
 int chars_check(char* src, char* dst, int length){

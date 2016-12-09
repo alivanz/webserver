@@ -1,10 +1,13 @@
 typedef struct{
   int state;
-  char percent_e[2];
+  char cc;
   char * buffer;
   int buffer_length;
   void * data;
 } urlencoded_t;
+
+#define ue_buffer(p) p->buffer
+#define ue_buffer_length(p) p->buffer_length
 
 enum{
   ue_key, ue_key_percent, ue_key_percent_data,

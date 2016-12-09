@@ -3,16 +3,28 @@
 
 #include "deps/fields.c"
 #include "deps/urlencoded.c"
+//#include "deps/multipart-parser-c/multipart_parser.c"
 #include "deps/constant.h"
 #include "storage.h"
+
+/* MODs */
+//  static void multipart_init(multipart_parser*p, const char *boundary, int boundary_length, const multipart_parser_settings* settings){
+//    memcpy(p->multipart_boundary, boundary, boundary_length);
+//    p->boundary_length = boundary_length;
+//
+//    p->lookbehind = (p->multipart_boundary + p->boundary_length + 1);
+//
+//    p->index = 0;
+//    p->state = s_start;
+//    p->settings = settings;
+//  }
 
 /* content_type FIELD */
 static int content_type_on_key(fields_t * p, char * at, int length){
   storage_t * self = p->data;
   if(chars_check("application/x-www-form-urlencoded", at,length)){
     /* Set encoding */
-    self->valid = 1;
-    self->encoding = encoding_urlencoded;
+    self->encoding = URLENCODED;
     Py_XDECREF(self->py_encoding);
     self->py_encoding = PyString_FromStringAndSize(at,length);
     /* Setup */
@@ -20,22 +32,30 @@ static int content_type_on_key(fields_t * p, char * at, int length){
     urlencoded_setup(setup);
     setup->data = self;
     self->setup = setup;
+    /* Set ready */
+    self->ready = 1;
   }else if(chars_check("multipart/form-data", at,length)){
-    /* Set encoding */
-    self->encoding = encoding_formdata;
-    Py_XDECREF(self->py_encoding);
-    self->py_encoding = PyString_FromStringAndSize(at,length);
-    /* Setup */
+    //  /* Set encoding */
+    //  self->encoding = FORMDATA;
+    //  Py_XDECREF(self->py_encoding);
+    //  self->py_encoding = PyString_FromStringAndSize(at,length);
+    //  /* Initial Setup */
+    //  multipart_info * setup = malloc(sizeof(multipart_info));
+    //  setup->self = self;
+    //  setup->multipart_setup.data = setup;
+    //  self->setup = setup;
   }else{
     return -1;
   }
   return 0;
 }
 static int content_type_on_param(fields_t * p, char * at, int length){
-  //storage_t * self = p->data;
-  //if(self->encoding==encoding_formdata){
+  storage_t * self = p->data;
+  if(self->encoding==FORMDATA){
+    if(chars_check("boundary",at,length)){
 
-  //}
+    }
+  }
   return 0;
 }
 static int content_type_on_param_value(fields_t * p, char * at, int length){
@@ -64,7 +84,7 @@ static int storage_init(storage_t * self, PyObject * args, PyObject * kwargs){
   self->boundary = NULL;
   self->room = NULL;
 
-  self->valid = 0;
+  self->ready = 0;
 
   self->field_key = NULL;
   self->field_filename = NULL;
@@ -78,8 +98,8 @@ static int storage_init(storage_t * self, PyObject * args, PyObject * kwargs){
     if(PyErr_Occurred()==NULL) PyErr_SetString(PyExc_TypeError,"invalid encoding (1)");
     return -1;
   }
-  if(!self->valid){
-    if(PyErr_Occurred()==NULL) PyErr_SetString(PyExc_TypeError,"invalid encoding");
+  if(!self->ready){
+    if(PyErr_Occurred()==NULL) PyErr_SetString(PyExc_TypeError,"encoding not ready");
     return -1;
   }
 
@@ -121,9 +141,7 @@ static int storage_on_header_end(storage_t * self){
     return -1;
   }
   PyObject * handler = PyObject_CallMethod((PyObject*)self, "item","O",self->field_key);
-  //PyObject * attr = PyObject_GetAttr((PyObject*)self, self->field_key);
   if(handler==NULL){
-    //PyErr_SetObject(PyExc_KeyError,self->field_key);
     return -1;
   }
   /* Set filename */
@@ -131,20 +149,25 @@ static int storage_on_header_end(storage_t * self){
     PyObject * result = PyObject_CallMethod(handler,"set_filename","O",self->field_filename);
     if(result==NULL) return -1;
     Py_DECREF(result);
+    /* Free */
+    Py_DECREF(self->field_filename);
+    self->field_filename = NULL;
   }
   /* Set Content-Type */
   if(self->field_content_type!=NULL && PyObject_HasAttrString(handler,"set_type")){
     PyObject * result = PyObject_CallMethod(handler,"set_type","O",self->field_content_type);
     if(result==NULL) return -1;
     Py_DECREF(result);
+    /* Free */
+    Py_DECREF(self->field_content_type);
+    self->field_content_type = NULL;
   }
   /* Store Handler */
   Py_XDECREF(self->room);
   self->room = handler;
   /* Cleaning */
-  Py_XDECREF(self->field_key);
-  Py_XDECREF(self->field_filename);
-  Py_XDECREF(self->field_content_type);
+  Py_DECREF(self->field_key);
+  self->field_key = NULL;
   return 0;
 }
 static int storage_on_data(storage_t * self, char* at, int length){
@@ -168,7 +191,7 @@ static int storage_on_data_end(storage_t * self){
 
 /* urlencoded callback */
 static int storage_urlencoded_on_key(urlencoded_t * p, char* at, int length){
-  printf("on_key\n");
+  //printf("on_key\n");
   storage_t * self = p->data;
   /* ON KEY */
   if(storage_on_key(self, at,length)) return -1;
@@ -176,11 +199,11 @@ static int storage_urlencoded_on_key(urlencoded_t * p, char* at, int length){
   return storage_on_header_end(self);
 }
 static int storage_urlencoded_on_data(urlencoded_t * p, char* at, int length){
-  printf("on_data\n");
+  //printf("on_data\n");
   return storage_on_data(p->data, at,length);
 }
 static int storage_urlencoded_on_data_end(urlencoded_t * p){
-  printf("on_data_end\n");
+  //printf("on_data_end\n");
   return storage_on_data_end(p->data);
 }
 static urlencoded_action storage_urlencoded_action = {
@@ -190,7 +213,45 @@ static urlencoded_action storage_urlencoded_action = {
 };
 
 /* multipart callback */
-// pass---------------------
+/*
+static int multipart_on_data_begin(multipart_parser* p){
+  return 0;
+}
+static int multipart_on_field(multipart_parser* p, const char *at, size_t length){
+  multipart_info * info = p->data;
+  if(chars_check("Content-Disposition",at,length)){
+    info->field_type = CONTENT_DISPOSITION;
+  }else{
+    info->field_type = 0;
+  }
+  return 0;
+}
+static int multipart_on_header_value(multipart_parser* p, const char *at, size_t length){
+  return 0;
+}
+static int multipart_on_header_complete(multipart_parser* p){
+  return storage_on_header_end(p->data);
+}
+static int multipart_on_data(multipart_parser* p, const char *at, size_t length){
+  return storage_on_data(p->data, at,length);
+}
+static int multipart_on_data_end(multipart_parser* p){
+  return storage_on_data_end(p->data);
+}
+static int multipart_on_body_end(multipart_parser* p){
+  return 0;
+}
+static multipart_parser_settings multipart_action = {
+  .on_header_field = multipart_on_field,
+  .on_header_value = multipart_on_header_value,
+  .on_part_data = multipart_on_data,
+
+  .on_part_data_begin = multipart_on_data_begin,
+  .on_headers_complete = multipart_on_header_complete,
+  .on_part_data_end = multipart_on_data_end,
+  .on_body_end = multipart_on_body_end
+};
+*/
 
 /* interface */
 static PyObject * storage_set_writeback(storage_t * self, PyObject * writeback){
@@ -204,46 +265,57 @@ static PyObject * storage_set_writeback(storage_t * self, PyObject * writeback){
   Py_RETURN_NONE;
 }
 static PyObject * storage_write(storage_t * self, PyObject * buffer){
+  /* Get String */
   if(!PyString_CheckExact(buffer)){
     PyErr_SetString(PyExc_KeyError,"buffer must be str");
     return NULL;
   }
+  //printf("get string...\n");
   char * at = PyString_AsString(buffer);
   int length = PyString_Size(buffer);
-
-  if(self->encoding==encoding_urlencoded){
+  /* Parse specific by its encoding */
+  if(self->encoding==URLENCODED){
+    /* URLENCODED */
+    //printf("write...\n");
     int parsed = urlencoded_execute(self->setup, &storage_urlencoded_action, at,length);
     if(PyErr_Occurred()!=NULL) return NULL;
     if(parsed != length){
       PyErr_SetString(PyExc_ValueError,"parse error");
       return NULL;
     }
-  }else if(self->encoding==encoding_formdata){
-    //Py_RETURN_NONE;
+  }else if(self->encoding==FORMDATA){
+    /* FORMDATA */
   }else{
+    /* unknown */
     PyErr_SetString(PyExc_RuntimeError,"unknown encoding");
     return NULL;
   }
+  /* finally */
   Py_RETURN_NONE;
 }
-static PyObject * storage_close(storage_t * self){
-  if(self->encoding==encoding_urlencoded){
-    if(urlencoded_execute(self->setup, &storage_urlencoded_action,NULL,0)){
-      if(PyErr_Occurred()==NULL)
-        PyErr_SetString(PyExc_ValueError,"parse error");
-      return NULL;
-    }
-  }else if(self->encoding==encoding_formdata){
-    // -----
-  }else{
-    PyErr_SetString(PyExc_RuntimeError,"unknown encoding");
-    return NULL;
-  }
-  if(storage_on_data_end(self)){
-    return NULL;
-  }
-  Py_RETURN_NONE;
-}
+//  static PyObject * storage_close(storage_t * self){
+//    /* Finalize specific by its encoding */
+//    if(self->encoding==URLENCODED){
+//      /* URLENCODED */
+//      if(urlencoded_execute(self->setup, &storage_urlencoded_action,NULL,0)){
+//        if(PyErr_Occurred()==NULL)
+//          PyErr_SetString(PyExc_ValueError,"parse error");
+//        return NULL;
+//      }
+//    }else if(self->encoding==FORMDATA){
+//      /* FORMDATA */
+//    }else{
+//      /* unknown */
+//      PyErr_SetString(PyExc_RuntimeError,"unknown encoding");
+//      return NULL;
+//    }
+//    /* Generic close callback */
+//    if(storage_on_data_end(self)){
+//      return NULL;
+//    }
+//    /* Finally */
+//    Py_RETURN_NONE;
+//  }
 
 /* MAPPING */
 static PyMemberDef storage_members[] = {
@@ -255,7 +327,7 @@ static PyMethodDef storage_methods[] = {
   //{"set_writeback", (PyCFunction)set_writeback, METH_O, "Set writeback." },
   {"set_writeback", (PyCFunction)storage_set_writeback, METH_O, "Set writeback." },
   {"write", (PyCFunction)storage_write, METH_O, "Write." },
-  {"close", (PyCFunction)storage_close, METH_NOARGS, "Close." },
+  //{"close", (PyCFunction)storage_close, METH_NOARGS, "Close." },
   {NULL}
 };
 

@@ -13,10 +13,10 @@ void urlencoded_setup(urlencoded_t * p){
 }
 static inline void urlencoded_append(urlencoded_t * p, char * at, int length){
   if(length==0) return;
-  int new_length = p->buffer_length + length;
-  p->buffer = realloc(p->buffer, new_length);
-  memcpy(p->buffer + p->buffer_length, at, length);
-  p->buffer_length = new_length;
+  int new_length = ue_buffer_length(p) + length;
+  ue_buffer(p) = realloc(ue_buffer(p), new_length);
+  memcpy(ue_buffer(p) + ue_buffer_length(p), at, length);
+  ue_buffer_length(p) = new_length;
 }
 static inline void urlencoded_free(urlencoded_t * p){
   if(p->buffer_length>0){
@@ -25,22 +25,38 @@ static inline void urlencoded_free(urlencoded_t * p){
     p->buffer_length = 0;
   }
 }
-#define urlencoded_action_data(p,action,at,length) action(p,p->buffer,p->buffer_length)
+#define urlencoded_action_data(p,action) action(p,p->buffer,p->buffer_length)
+
+#define do_append_char {\
+  buffer[blen] = c;\
+  blen += 1;\
+}
+#define do_store {\
+  ue_buffer(p) = realloc(ue_buffer(p), ue_buffer_length(p)+blen);\
+  memcpy(ue_buffer(p) + ue_buffer_length(p), buffer, blen);\
+  ue_buffer_length(p) += blen;\
+  blen = 0;\
+}
+#define do_free {\
+    if(ue_buffer(p)!=NULL){\
+      free(ue_buffer(p));\
+      ue_buffer(p) = NULL;\
+      ue_buffer_length(p) = 0;\
+    }\
+}
 
 int urlencoded_execute(urlencoded_t * p, urlencoded_action * action, char * at, int length){
   if(p->state == ue_final) return 0;
-  if(length<1){
+  if(length==0){
     /* End signal */
     if(p->state==ue_value){
       p->state = ue_final;
-      int r = urlencoded_action_data(p,action->on_data,buffer,blen);
-      urlencoded_free(p);
-      if(r) return -1;
       action->on_data_end(p);
     }else if(p->state==ue_key){
       p->state = ue_final;
-      int r = urlencoded_action_data(p,action->on_key,buffer,blen);
-      urlencoded_free(p);
+      int r = urlencoded_action_data(p,action->on_key);
+      //urlencoded_free(p);
+      do_free
       if(r) return -1;
     }else{
       return -1;
@@ -55,97 +71,122 @@ int urlencoded_execute(urlencoded_t * p, urlencoded_action * action, char * at, 
   // loop
   while(i<length){
     char c = at[i];
-    printf("%c\n", c);
     switch (p->state) {
       case ue_key:
       if(c=='='){
-        urlencoded_append(p,buffer,blen);
-        if(urlencoded_action_data(p,action->on_key,buffer,blen)) return i;
-        urlencoded_free(p);
-        blen = 0;
+        /* Store data */
+        if(blen>0) do_store
+        /* callback */
+        if(urlencoded_action_data(p,action->on_key)) return i;
+        /* Free data */
+        do_free
+        /* Next state */
         p->state = ue_value;
         break;
       }else if(c=='%'){
+        /* Next state */
         p->state = ue_key_percent;
         break;
       }else if(valid_unreserved(c)){
-        buffer[blen] = c;
-        blen += 1;
+        /* store char */
+        do_append_char
         break;
       }else{
+        /* invalid */
         return i;
       }
 
       case ue_key_percent:
       if(valid_hexadecimal(c)){
-        p->percent_e[0] = c;
+        /* set char */
+        p->cc = hexadecimal_byte(c)<<4;
+        /* Next state */
         p->state = ue_key_percent_data;
         break;
       }else{
+        /* invalid */
         return i;
       }
 
       case ue_key_percent_data:
       if(valid_hexadecimal(c)){
-        p->percent_e[1] = c;
-        buffer[blen] = hexadecimal_decode(p->percent_e);
+        /* store char */
+        p->cc |= hexadecimal_byte(c);
+        buffer[blen] = p->cc;
         blen += 1;
+        /* Next state */
         p->state = ue_key;
         break;
       }else{
+        /* invalid */
         return i;
       }
 
       case ue_value:
       if(c=='&'){
-        urlencoded_append(p,buffer,blen);
-        if(p->buffer_length>0){
-          if(urlencoded_action_data(p,action->on_data,buffer,blen)) return i;
-          urlencoded_free(p);
+        /* Store data */
+        if(blen>0) do_store
+        /* callback */
+        if(ue_buffer_length(p)>0){
+          if(urlencoded_action_data(p,action->on_data)) return i;
+          /* free data */
+          do_free
         }
+        /* callback */
         action->on_data_end(p);
-        blen = 0;
+        /* Next state */
         p->state = ue_key;
         break;
       }else if(c=='%'){
+        /* Next state */
         p->state = ue_value_percent;
         break;
       }else if(valid_unreserved(c)){
-        buffer[blen] = c;
-        blen += 1;
+        /* store char */
+        do_append_char
         break;
       }else{
+        /* invalid */
         return i;
       }
 
       case ue_value_percent:
       if(valid_hexadecimal(c)){
-        p->percent_e[0] = c;
+        /* store char */
+        buffer[blen] = hexadecimal_byte(c)<<4;
+        /* Next state */
         p->state = ue_value_percent_data;
         break;
       }else{
+        /* invalid */
         return i;
       }
 
       case ue_value_percent_data:
       if(valid_hexadecimal(c)){
-        p->percent_e[1] = c;
-        buffer[blen] = hexadecimal_decode(p->percent_e);
+        /* store char */
+        buffer[blen] |= hexadecimal_byte(c);
         blen += 1;
+        /* Next state */
         p->state = ue_value;
         break;
       }else{
+        /* invalid */
         return i;
       }
     }
     i++;
   }
   if(blen>0){
-    urlencoded_append(p,buffer,blen);
-    // on partial value
-    if(ue_value<=p->state && p->state<=ue_value_percent_data){
-      int r = urlencoded_action_data(p,action->on_data,buffer,blen);
-      urlencoded_free(p);
+    /* store data */
+    do_store
+    /* callback */
+    if(ue_value<=p->state && p->state<=ue_value_percent_data && ue_buffer_length(p)>0){
+      /* call */
+      int r = urlencoded_action_data(p,action->on_data);
+      /* free data */
+      do_free
+      /* check validity */
       if(r) return i-1;
     }
   }

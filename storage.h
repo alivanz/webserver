@@ -22,9 +22,16 @@ typedef struct{
   PyObject * room;
 
   /* Reserved */
-  int valid;
+  int ready;
 } storage_t;
 
-enum{
+/*enum{
   encoding_urlencoded, encoding_formdata
-} encoding_list;
+} encoding_list;*/
+
+//  typedef struct{
+//    storage_t * self;
+//    multipart_parser multipart_setup;
+//    int field_type;
+//    fields_t fields_setup;
+//  } multipart_info;
