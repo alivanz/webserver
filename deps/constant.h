@@ -26,22 +26,22 @@ static void constant_init(PyObject * m){
   if(constant_initialized) return;
   constant_initialized = 1;
   http_error = PyErr_NewExceptionWithDoc(
-    "alivanz.error",
+    "error.error",
     "base http_error",
     NULL,NULL /* base,dict */
   );
   client_error = PyErr_NewExceptionWithDoc(
-    "alivanz.client_error",
+    "error.client_error",
     "Client error",
     http_error,NULL /* base,dict */
   );
   server_error = PyErr_NewExceptionWithDoc(
-    "alivanz.server_error",
+    "error.server_error",
     "Server error",
     http_error,NULL /* base,dict */
   );
   parse_error = PyErr_NewExceptionWithDoc(
-    "alivanz.parse_error",
+    "error.parse_error",
     "Parse error",
     client_error,NULL /* base,dict */
   );

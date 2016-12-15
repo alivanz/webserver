@@ -4,6 +4,9 @@
 typedef struct{
   PyObject_HEAD
 
+  /* Setup */
+  unsigned int max_key_length;
+
   /* General info */
   int encoding;
   PyObject * py_encoding;

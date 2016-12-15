@@ -44,6 +44,7 @@ static int content_type_on_key(fields_t * p, char * at, int length){
     //  setup->self = self;
     //  setup->multipart_setup.data = setup;
     //  self->setup = setup;
+    return -1;
   }else{
     return -1;
   }
@@ -95,7 +96,7 @@ static int storage_init(storage_t * self, PyObject * args, PyObject * kwargs){
   fields_setup(&f);
   f.data = self;
   if( fields_execute(&f,&content_type_action, content_type,content_type_length) != content_type_length ){
-    if(PyErr_Occurred()==NULL) PyErr_SetString(PyExc_TypeError,"invalid encoding (1)");
+    if(PyErr_Occurred()==NULL) PyErr_SetString(PyExc_TypeError,"invalid encoding");
     return -1;
   }
   if(!self->ready){
@@ -140,7 +141,7 @@ static int storage_on_header_end(storage_t * self){
     PyErr_SetString(PyExc_KeyError,"key undefined.");
     return -1;
   }
-  PyObject * handler = PyObject_CallMethod((PyObject*)self, "item","O",self->field_key);
+  PyObject * handler = PyObject_CallMethod((PyObject*)self, "field","O",self->field_key);
   if(handler==NULL){
     return -1;
   }
@@ -191,7 +192,6 @@ static int storage_on_data_end(storage_t * self){
 
 /* urlencoded callback */
 static int storage_urlencoded_on_key(urlencoded_t * p, char* at, int length){
-  //printf("on_key\n");
   storage_t * self = p->data;
   /* ON KEY */
   if(storage_on_key(self, at,length)) return -1;
@@ -199,11 +199,9 @@ static int storage_urlencoded_on_key(urlencoded_t * p, char* at, int length){
   return storage_on_header_end(self);
 }
 static int storage_urlencoded_on_data(urlencoded_t * p, char* at, int length){
-  //printf("on_data\n");
   return storage_on_data(p->data, at,length);
 }
 static int storage_urlencoded_on_data_end(urlencoded_t * p){
-  //printf("on_data_end\n");
   return storage_on_data_end(p->data);
 }
 static urlencoded_action storage_urlencoded_action = {
@@ -270,13 +268,11 @@ static PyObject * storage_write(storage_t * self, PyObject * buffer){
     PyErr_SetString(PyExc_KeyError,"buffer must be str");
     return NULL;
   }
-  //printf("get string...\n");
   char * at = PyString_AsString(buffer);
   int length = PyString_Size(buffer);
   /* Parse specific by its encoding */
   if(self->encoding==URLENCODED){
     /* URLENCODED */
-    //printf("write...\n");
     int parsed = urlencoded_execute(self->setup, &storage_urlencoded_action, at,length);
     if(PyErr_Occurred()!=NULL) return NULL;
     if(parsed != length){
@@ -320,14 +316,13 @@ static PyObject * storage_write(storage_t * self, PyObject * buffer){
 /* MAPPING */
 static PyMemberDef storage_members[] = {
   {"writeback", T_OBJECT, offsetof(storage_t, writeback), READONLY, "writeback. Setup by storage.set_writeback(writeback)"},
-  {"encoding", T_OBJECT, offsetof(storage_t, py_encoding), READONLY, "encoding."},
+  {"encoding", T_OBJECT, offsetof(storage_t, py_encoding), READONLY, "encoding. Setup while __init__ called."},
+  {"max_key_length", T_UINT, offsetof(storage_t, max_key_length), 0, "Maximum key length."}, // not implemented yet
   {NULL}
 };
 static PyMethodDef storage_methods[] = {
-  //{"set_writeback", (PyCFunction)set_writeback, METH_O, "Set writeback." },
   {"set_writeback", (PyCFunction)storage_set_writeback, METH_O, "Set writeback." },
-  {"write", (PyCFunction)storage_write, METH_O, "Write." },
-  //{"close", (PyCFunction)storage_close, METH_NOARGS, "Close." },
+  {"write", (PyCFunction)storage_write, METH_O, "Write. Sending zero length string defined as end of input." },
   {NULL}
 };
 
@@ -358,7 +353,14 @@ static PyTypeObject storage_type = {
     "\n"
     "Supported encoding:\n"
     "\tapplication/x-www-form-urlencoded\n"
-    "\tmultipart/form-data (under construction)\n",           /* tp_doc */
+    "\tmultipart/form-data (under construction)\n"
+    "This object will get object handler through self.field(key),\nkey argument is HTTP key name.\n"
+    "\n"
+    "Object handler interface (self defined):\n"
+    "\thandler.set_filename(filename)\n"
+    "\thandler.set_type(content_type)\n"
+    "\thandler.write(buffer)\n"
+    "\thandler.close()\n",           /* tp_doc */
     0,		               /* tp_traverse */
     0,		               /* tp_clear */
     0,		               /* tp_richcompare */
